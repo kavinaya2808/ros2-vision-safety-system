@@ -9,6 +9,8 @@
 //   ros2 param set /cruise_driver enabled false
 //   ros2 param set /cruise_driver speed 0.2
 
+#include <chrono>
+
 #include <geometry_msgs/msg/twist.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
@@ -30,8 +32,10 @@ public:
     const double rate_hz = declare_parameter<double>("rate_hz", 20.0, ro);
 
     pub_ = create_publisher<geometry_msgs::msg::Twist>("cmd_vel_raw", rclcpp::QoS(10));
-    timer_ = rclcpp::create_timer(
-      this, get_clock(), rclcpp::Duration::from_seconds(1.0 / rate_hz),
+    // Wall timer: keeps requesting even if /clock is late (the safety layer decides).
+    timer_ = create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(1.0 / rate_hz)),
       [this]() {
         geometry_msgs::msg::Twist cmd;
         if (get_parameter("enabled").as_bool()) {

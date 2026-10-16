@@ -13,6 +13,11 @@
 // published when a command arrived, a stop decision made between commands would
 // never reach the robot, and silence upstream would mean "keep driving".
 //
+// The timer runs on WALL time, not ROS time. In simulation, ROS time comes from
+// /clock; if /clock stopped, a ROS-time timer would stop too and the robot would
+// keep its last command. A ClockWatchdog checks that ROS time is advancing and
+// forces a zero command when it is not.
+//
 // All decisions are made by vision_safety::SafetyMonitor (unit-tested in
 // vision_safety_core). This node only moves data between ROS and that class.
 
@@ -33,6 +38,7 @@
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_components/register_node_macro.hpp>
 
+#include "vision_safety_core/clock_watchdog.hpp"
 #include "vision_safety_core/safety_monitor.hpp"
 #include "vision_safety_interfaces/msg/obstacle_detection.hpp"
 #include "vision_safety_interfaces/msg/safety_status.hpp"
@@ -94,6 +100,8 @@ public:
     if (!std::isfinite(rate_hz) || rate_hz < 1.0 || rate_hz > 1000.0) {
       throw std::invalid_argument("rate_hz must be in [1, 1000]");
     }
+    clock_watchdog_ = std::make_unique<vision_safety::ClockWatchdog>(
+      get_parameter("clock_stall_timeout_s").as_double());
 
     on_set_handle_ = add_on_set_parameters_callback(
       [this](const std::vector<rclcpp::Parameter> & changes) {return validate_changes(changes);});
@@ -110,9 +118,10 @@ public:
       "cmd_vel_raw", rclcpp::QoS(10),
       [this](Twist::ConstSharedPtr msg) {on_command(*msg);});
 
-    // ROS-time timer: follows /clock in simulation, wall time on a real robot.
-    timer_ = rclcpp::create_timer(
-      this, get_clock(), rclcpp::Duration::from_seconds(1.0 / rate_hz),
+    // WALL timer: the heartbeat must not depend on /clock (see header comment).
+    timer_ = create_wall_timer(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::duration<double>(1.0 / rate_hz)),
       [this]() {on_timer();});
 
     diagnostics_.setHardwareID("vision_bot");
@@ -148,7 +157,10 @@ private:
 
   void declare_all_parameters()
   {
-    declare<double>("rate_hz", 20.0, "output rate of cmd_vel and safety/status", true);
+    declare<double>("rate_hz", 20.0, "output rate of cmd_vel and safety/status (wall time)", true);
+    declare<double>(
+      "clock_stall_timeout_s", 0.5,
+      "ROS time standing still this long (wall time) forces a stop", true);
     declare<double>("max_detection_age_s", 0.3, "older perception counts as stale -> full stop");
     declare<double>("command_timeout_s", 0.5, "older cmd_vel_raw is ignored -> zero output");
     declare<double>("clear_hold_time_s", 0.5, "path must stay clear this long before resuming");
@@ -231,11 +243,23 @@ private:
   void on_timer()
   {
     const rclcpp::Time stamp = now();
+    const double wall_s = std::chrono::duration<double>(
+      std::chrono::steady_clock::now().time_since_epoch()).count();
     SafetyOutput out;
     Twist requested;
     {
       std::lock_guard<std::mutex> lock(mutex_);
+      const bool clock_ok = clock_watchdog_->update(stamp.seconds(), wall_s);
       out = monitor_->update(stamp.seconds());
+      if (!clock_ok) {
+        // Without a running clock, freshness cannot be judged: never move.
+        if (out.state != SafetyState::kInit) {
+          out.state = SafetyState::kStopStale;
+        }
+        out.command = Velocity{};
+        out.reason = clock_watchdog_->reason();
+      }
+      clock_ok_ = clock_ok;
       requested = last_requested_;
       last_output_ = out;
     }
@@ -288,9 +312,13 @@ private:
 
     SafetyOutput out;
     uint64_t detections = 0;
+    bool clock_ok = false;
+    std::string clock_reason;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       out = last_output_;
+      clock_ok = clock_ok_;
+      clock_reason = clock_watchdog_->reason();
       detections = detections_in_window_;
       detections_in_window_ = 0;
     }
@@ -315,6 +343,10 @@ private:
         break;
     }
 
+    if (!clock_ok) {
+      stat.mergeSummary(DiagnosticStatus::ERROR, clock_reason);
+    }
+
     // T7 at runtime: any other publisher on cmd_vel can bypass this node.
     const std::size_t publishers = count_publishers("cmd_vel");
     if (publishers > 1) {
@@ -329,6 +361,7 @@ private:
     }
 
     stat.add("state", vision_safety::to_string(out.state));
+    stat.add("ros_clock", clock_ok ? std::string("running") : clock_reason);
     stat.add("reason", out.reason);
     stat.addf("detection_age_s", "%.3f", out.detection_age_s);
     stat.addf("detection_rate_hz", "%.1f", detection_rate);
@@ -342,6 +375,8 @@ private:
   // ------------------------------------------------------------------- state
   std::mutex mutex_;
   std::unique_ptr<SafetyMonitor> monitor_;
+  std::unique_ptr<vision_safety::ClockWatchdog> clock_watchdog_;
+  bool clock_ok_{false};
   std::optional<double> last_detection_stamp_;
   Twist last_requested_;
   SafetyOutput last_output_;

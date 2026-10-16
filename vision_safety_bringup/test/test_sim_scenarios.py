@@ -270,3 +270,28 @@ class TestResultsRecorded(unittest.TestCase):
             metrics = json.load(f)['metrics']
         for key in ('true_gap_at_trigger_m', 'final_gap_m', 'travel_after_trigger_m'):
             self.assertIn(key, metrics)
+
+    def test_zz_no_orphaned_gazebo_left_behind(self):
+        """gz's ruby wrapper can exit while the real simulator keeps running, orphaned,
+        rendering at full speed and slowing everything after it. Remove ours."""
+        import signal
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
+        from robustness_study import find_gz_servers
+
+        partition = os.environ['GZ_PARTITION']
+
+        def ours():
+            return [pid for pid, part, _ in find_gz_servers() if part == partition]
+
+        deadline = time.monotonic() + 5.0     # give a clean exit a moment first
+        while ours() and time.monotonic() < deadline:
+            time.sleep(0.2)
+        for pid in ours():
+            print(f'[cleanup] killing orphaned Gazebo server pid {pid}')
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.5)
+        self.assertEqual(ours(), [], 'orphaned Gazebo server survived SIGKILL')

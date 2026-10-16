@@ -17,6 +17,7 @@ find_package(ament_cmake REQUIRED)
 find_package(OpenCV REQUIRED COMPONENTS core imgproc)
 
 add_library(${PROJECT_NAME} SHARED
+  src/clock_watchdog.cpp
   src/color_detector.cpp
   src/danger_zone.cpp
   src/debug_overlay.cpp
@@ -47,6 +48,9 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_safety_monitor test/test_safety_monitor.cpp)
   target_link_libraries(test_safety_monitor ${PROJECT_NAME})
+
+  ament_add_gtest(test_clock_watchdog test/test_clock_watchdog.cpp)
+  target_link_libraries(test_clock_watchdog ${PROJECT_NAME})
 
   ament_add_gtest(test_color_detector test/test_color_detector.cpp)
   target_link_libraries(test_color_detector ${PROJECT_NAME})

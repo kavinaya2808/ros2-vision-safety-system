@@ -32,6 +32,7 @@ from rcl_interfaces.srv import SetParameters  # noqa: E402
 import rclpy  # noqa: E402
 from rclpy.duration import Duration  # noqa: E402
 from rclpy.qos import HistoryPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
+from rosgraph_msgs.msg import Clock  # noqa: E402
 from vision_safety_interfaces.msg import ObstacleDetection, SafetyStatus  # noqa: E402
 
 RATE_HZ = 20.0
@@ -60,8 +61,18 @@ def generate_test_description():
             'max_angular_speed': 1.5,
         }],
     )
-    return launch.LaunchDescription([node, launch_testing.actions.ReadyToTest()]), {
-        'safety_monitor': node}
+    # Second instance on SIMULATION time, with no /clock publisher at all (topics
+    # under /sim so it cannot interfere with the first instance).
+    sim_node = launch_ros.actions.Node(
+        package='vision_safety_ros', executable='safety_monitor', name='safety_monitor_simtime',
+        output='screen',
+        parameters=[{'use_sim_time': True, 'clear_hold_time_s': HOLD}],
+        remappings=[('cmd_vel', '/sim/cmd_vel'), ('cmd_vel_raw', '/sim/cmd_vel_raw'),
+                    ('perception/obstacle', '/sim/perception/obstacle'),
+                    ('safety/status', '/sim/safety/status')],
+    )
+    return launch.LaunchDescription([node, sim_node, launch_testing.actions.ReadyToTest()]), {
+        'safety_monitor': node, 'safety_monitor_simtime': sim_node}
 
 
 class Harness:
@@ -313,6 +324,70 @@ class TestSafetyMonitorNode(unittest.TestCase):
         self.assertTrue(good.successful, good.reason)
         set_double('max_detection_age_s', MAX_AGE)   # restore
         self.h.node.destroy_client(client)
+
+    def test_11_without_clock_the_heartbeat_continues_and_commands_zero(self):
+        """use_sim_time with no /clock: ROS time stays 0. The output timer runs on wall
+        time, so the node must keep publishing, command zero, and say why. Once /clock
+        runs, it must release normally."""
+        node = self.h.node
+        latest = QoSProfile(depth=1, history=HistoryPolicy.KEEP_LAST,
+                            reliability=ReliabilityPolicy.RELIABLE)
+        det_pub = node.create_publisher(ObstacleDetection, '/sim/perception/obstacle', latest)
+        cmd_pub = node.create_publisher(Twist, '/sim/cmd_vel_raw', 10)
+        clock_pub = node.create_publisher(Clock, '/clock', 10)
+        outs, statuses = [], []
+        subs = [
+            node.create_subscription(Twist, '/sim/cmd_vel',
+                                     lambda m: outs.append((time.monotonic(), m.linear.x)), 50),
+            node.create_subscription(SafetyStatus, '/sim/safety/status', statuses.append, 50),
+        ]
+        try:
+            end = time.monotonic() + 15.0
+            while det_pub.get_subscription_count() == 0 or not statuses:
+                self.assertLess(time.monotonic(), end, 'simtime safety_monitor not reachable')
+                rclpy.spin_once(node, timeout_sec=0.05)
+
+            def run(seconds, sim_t0=None):
+                start = time.monotonic()
+                next_pub = 0.0
+                while time.monotonic() - start < seconds:
+                    now = time.monotonic()
+                    if now >= next_pub:
+                        det = ObstacleDetection()
+                        if sim_t0 is not None:
+                            sim_now = sim_t0 + (now - start)
+                            clk = Clock()
+                            clk.clock.sec = int(sim_now)
+                            clk.clock.nanosec = int((sim_now % 1.0) * 1e9)
+                            clock_pub.publish(clk)
+                            det.header.stamp = clk.clock
+                        det.gap_m = float('nan')
+                        det_pub.publish(det)
+                        twist = Twist()
+                        twist.linear.x = 0.3
+                        cmd_pub.publish(twist)
+                        next_pub = now + 0.01
+                    rclpy.spin_once(node, timeout_sec=0.002)
+
+            # Phase 1: no /clock at all.
+            t = time.monotonic()
+            run(1.5)
+            phase1 = [lin for tt, lin in outs if tt >= t]
+            self.assertGreaterEqual(len(phase1), 15, 'heartbeat stopped without /clock')
+            self.assertTrue(all(lin == 0.0 for lin in phase1), 'moved without a running clock')
+            self.assertIn('clock', statuses[-1].reason)
+
+            # Phase 2: /clock starts (sim time from 1000 s); clear detections in sim time.
+            t = time.monotonic()
+            run(HOLD + 1.2, sim_t0=1000.0)
+            moving = [lin for tt, lin in outs if tt >= t and lin > 0.0]
+            self.assertTrue(moving, 'did not release after /clock started')
+            self.assertEqual(statuses[-1].state, SafetyStatus.STATE_CLEAR, statuses[-1].reason)
+        finally:
+            for sub in subs:
+                node.destroy_subscription(sub)
+            for pub in (det_pub, cmd_pub, clock_pub):
+                node.destroy_publisher(pub)
 
 
 @launch_testing.post_shutdown_test()

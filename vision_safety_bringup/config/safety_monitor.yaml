@@ -3,7 +3,8 @@
 
 safety_monitor:
   ros__parameters:
-    rate_hz: 20.0                 # cmd_vel + safety/status output rate (read-only)
+    rate_hz: 20.0                 # cmd_vel + safety/status output rate, WALL time (read-only)
+    clock_stall_timeout_s: 0.5    # ROS/sim time frozen this long -> stop (read-only)
 
     # Perception older than this (sim time, measured from the IMAGE stamp) -> full stop.
     # Camera runs at 30 Hz (33 ms/frame) and perception takes ~3 ms, so 0.3 s means

@@ -2,12 +2,7 @@
 # Gazebo-side topics are namespaced under /vision_bot (set in the robot xacro);
 # ROS-side topics use the standard names the rest of the system expects.
 
-# Simulation clock -> every node runs with use_sim_time:=true
-- ros_topic_name: "/clock"
-  gz_topic_name: "/clock"
-  ros_type_name: "rosgraph_msgs/msg/Clock"
-  gz_type_name: "gz.msgs.Clock"
-  direction: GZ_TO_ROS
+# /clock is bridged by a separate clock_bridge node (see sim.launch.py).
 
 # Velocity command into the DiffDrive plugin.
 # Later, ONLY safety_monitor will publish /cmd_vel; controllers use /cmd_vel_raw.

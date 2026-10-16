@@ -95,10 +95,22 @@ def generate_launch_description():
         }],
     )
 
+    # The clock SOURCE gets its own bridge on wall time: a node that publishes
+    # /clock should not itself depend on /clock (use_sim_time) to run.
+    clock_bridge = Node(
+        package='ros_gz_bridge',
+        executable='parameter_bridge',
+        name='clock_bridge',
+        output='screen',
+        arguments=['/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock'],
+        parameters=[{'use_sim_time': False}],
+    )
+
     return LaunchDescription(declare_args + [
         gazebo_gui,
         gazebo_headless,
         robot_state_publisher,
         spawn_robot,
+        clock_bridge,
         bridge,
     ])

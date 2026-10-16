@@ -1,78 +1,90 @@
 # Test results
 
-Last full run: **2026-10-16**, all suites green.
-
-| | |
-|---|---|
-| Host | Ubuntu 22.04, NVIDIA GeForce RTX 5070 Ti |
-| Container | ROS 2 Jazzy (`osrf/ros:jazzy-desktop`), Gazebo Harmonic, see [`docker/`](../docker) |
-| Result | `colcon test-result`: **124 test cases, 0 errors, 0 failures, 0 skipped** |
+Environment: Ubuntu 22.04 host, NVIDIA RTX 5070 Ti, ROS 2 Jazzy container, Gazebo Harmonic.
+Last run: 2026-10-16.
 
 ## Suites
 
-| Suite | Package | Needs | Tests |
-|---|---|---|---|
-| `test_safety_monitor` | `vision_safety_core` | nothing | 36 |
-| `test_danger_zone` | `vision_safety_core` | nothing | 26 |
-| `test_color_detector` | `vision_safety_core` | nothing | 16 |
-| `test_pipeline` (synthetic 3D scenes → detector → zone) | `vision_safety_core` | nothing | 10 |
-| `test_debug_overlay` | `vision_safety_core` | nothing | 7 |
-| `test_safety_monitor_node.py` | `vision_safety_ros` | ROS 2 | 11 + exit-code check |
-| `test_obstacle_detector_node.py` | `vision_safety_ros` | ROS 2 | 9 + exit-code check |
-| `test_sim_scenarios.py` | `vision_safety_bringup` | ROS 2 + Gazebo + GPU | 4 + results check |
+| Suite | Package | Tests |
+|---|---|---|
+| `test_safety_monitor` | `vision_safety_core` | 36 |
+| `test_danger_zone` | `vision_safety_core` | 26 |
+| `test_color_detector` | `vision_safety_core` | 16 |
+| `test_pipeline` (synthetic 3D scenes) | `vision_safety_core` | 10 |
+| `test_clock_watchdog` | `vision_safety_core` | 7 |
+| `test_debug_overlay` | `vision_safety_core` | 7 |
+| `test_safety_monitor_node.py` | `vision_safety_ros` | 12 + exit codes |
+| `test_obstacle_detector_node.py` | `vision_safety_ros` | 9 + exit codes |
+| `test_sim_scenarios.py` (headless Gazebo) | `vision_safety_bringup` | 4 + 2 post-shutdown |
+| `test_robustness_logic.py` | `vision_safety_bringup` | 31 |
 
-The core library is also built with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion` and was run
-under AddressSanitizer and UndefinedBehaviorSanitizer during development.
+`vision_safety_core` is compiled with `-Wall -Wextra -Wpedantic -Wshadow -Wconversion` and was
+run under AddressSanitizer and UndefinedBehaviorSanitizer.
 
-## Scenario metrics (headless Gazebo)
+## Scenario test (`test_sim_scenarios.py`)
 
-Produced by `test_sim_scenarios.py` (written to `/tmp/vision_safety_results/sim_metrics.json`).
-Robot cruising at 0.3 m/s towards a 0.3 m red cube; stop gap 0.60 m; hold time 0.5 s.
+Robot at 0.3 m/s towards a 0.3 m red cube. Stop gap 0.60 m, hold time 0.5 s.
 
 | Metric | Value |
 |---|---|
-| Distance cruised before the stop decision | 2.115 m |
-| True gap at the stop decision (from odometry) | 0.585 m |
-| Perceived gap at the stop decision (camera only) | 0.593 m |
+| Distance driven before the stop decision | 2.115 m |
+| True gap at the stop decision (odometry) | 0.585 m |
+| Estimated gap at the stop decision (camera) | 0.593 m |
 | Travel after the stop decision | 0.022 m |
-| Time from stop decision to standstill | 0.172 s |
-| Final gap to the obstacle | 0.562 m |
-| Creep while blocked (cruise still requesting 0.3 m/s for 3 s) | 0.000 m |
-| Resume delay after the path cleared | 0.549 s |
-| Passed the box after it was moved beside the path | yes, no new stop |
-| Perception processing time (median) | 0.71 ms |
+| Stop decision to standstill | 0.172 s |
+| Final gap | 0.562 m |
+| Creep while blocked, 3 s of forward requests | 0.000 m |
+| Release delay after the path cleared | 0.549 s |
+| Box moved beside the path | passed without stopping |
+| Perception time per frame (median) | 0.71 ms |
 
-### Reading the numbers
+- Travel after the decision matches the braking distance at the 2 m/s² deceleration limit:
+  0.3² / (2 · 2) = 2.25 cm.
+- The 1.5 cm between the configured 0.600 m and the true 0.585 m corresponds to about 50 ms of
+  perception-to-decision latency at 0.3 m/s (one control cycle).
+- Release delay = 0.5 s hold time + one 50 ms cycle.
 
-- **Perception accuracy:** the monocular ground-plane estimate was 8 mm off the odometry ground
-  truth (1.4 %) at the moment it mattered.
-- **Why the stop happened at 0.585 m, not 0.600 m:** the frame that crossed the threshold still had
-  to travel through perception and the 20 Hz safety cycle. 1.5 cm at 0.3 m/s is about 50 ms of
-  latency, which is one control cycle.
-- **Braking matches physics:** 2.2 cm of travel after the decision is the kinematic braking
-  distance at the robot's 2 m/s² deceleration limit: 0.3² / (2 × 2) = 2.25 cm. Time to rest
-  (0.17 s) is 0.15 s of braking plus less than one control cycle.
-- **Resume delay** is the configured 0.5 s hold plus one 50 ms cycle, as designed.
-- **Zero creep** while the cruise driver kept requesting forward motion shows that nothing leaked
-  through the safety layer.
+## Robustness study (`robustness_study.py`, seed 42)
 
-## Manual checks during development
+30 scenarios, each in a fresh headless Gazebo instance with one red box: size 0.10–0.40 m,
+start distance 1.5–3.5 m, random lateral offset, cruise speed 0.2 / 0.3 / 0.5 m/s. The expected
+outcome is set from geometry before each run.
 
-From running the full system interactively:
+| Case | Inner edge of box | Expected | Runs | Result |
+|---|---|---|---|---|
+| In path | ≤ 0.10 m | stop, final gap ≥ 0.20 m | 13 | 13 stopped |
+| Beside path | ≥ 0.33 m | pass without stopping | 7 | 7 passed |
+| Near path edge | 0.10–0.33 m | either | 8 | 5 stopped, 3 passed |
 
-| Check | Observation |
+Final gap for in-path boxes (0.11–0.38 m):
+
+| Speed | Runs | Final gap |
+|---|---|---|
+| 0.2 m/s | 4 | 0.58–0.59 m |
+| 0.3 m/s | 3 | 0.56 m |
+| 0.5 m/s | 6 | 0.50–0.52 m |
+
+Near-edge decisions follow the configured path half-width of 0.24 m: stopped at inner edges
+0.115–0.225 m, passed at 0.27–0.295 m.
+
+Infrastructure: in 8 runs the simulator's `/clock` did not reach ROS at start-up and the run was
+restarted once. Two runs failed again and were excluded (28 of 30 judged). In these runs the
+safety monitor held the robot at zero output (clock watchdog). Repeating one scenario five times
+gave final gaps within ±1 cm.
+
+## Manual checks
+
+| Check | Result |
 |---|---|
-| Detector process killed while the robot was blocked (T5) | `STOP_OBSTACLE -> STOP_STALE` after 0.33 s and 0.35 s (limit 0.30 s + one 50 ms cycle) |
-| Detector restarted with the box still in the path | `STOP_STALE -> STOP_OBSTACLE`, the robot stayed stopped |
-| Teleop started without remapping to `cmd_vel_raw` (T7) | warning and `/diagnostics` error: 2 publishers on `cmd_vel` |
-| Box moved aside (T3) | `STOP_OBSTACLE -> CLEAR`, robot drove on |
-| Stop gap shown in the debug overlay | 0.56 m |
+| Detector process killed while blocked | `STOP_STALE` after 0.33 s / 0.35 s (limit 0.30 s + one cycle) |
+| Detector restarted, obstacle still in path | `STOP_STALE -> STOP_OBSTACLE`, robot stayed stopped |
+| Teleop publishing directly to `cmd_vel` | `/diagnostics` error: 2 publishers on `cmd_vel` |
+| Obstacle moved out of the path | `STOP_OBSTACLE -> CLEAR`, robot resumed |
 
 ## Reproduce
 
 ```bash
-colcon test --packages-select vision_safety_core vision_safety_ros vision_safety_bringup \
-  --event-handlers console_direct+
+colcon test --packages-select vision_safety_core vision_safety_ros vision_safety_bringup
 colcon test-result --verbose
-cat /tmp/vision_safety_results/sim_metrics.md
+ros2 run vision_safety_bringup robustness_study.py
 ```
