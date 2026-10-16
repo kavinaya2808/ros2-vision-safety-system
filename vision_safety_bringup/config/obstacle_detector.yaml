@@ -1,0 +1,35 @@
+# obstacle_detector parameters.
+# Every value can be changed live, e.g.:
+#   ros2 param set /obstacle_detector zone.stop_gap_m 0.8
+# Invalid values are rejected with a reason and the old value is kept.
+
+obstacle_detector:
+  ros__parameters:
+    publish_debug_image: true
+    base_frame: base_footprint
+
+    color:
+      # Red needs two hue bands (hue wraps around at 0/180 in OpenCV).
+      # Per band: h_min, h_max, s_min, s_max, v_min, v_max
+      hsv_ranges: [0, 10, 120, 255, 70, 255,
+                   170, 179, 120, 255, 70, 255]
+      min_area_ratio: 0.002       # blobs < 0.2 % of the image are noise (~614 px at 640x480)
+      morph_kernel_size: 5
+
+    zone:
+      # Worst-case travel after a trigger at 0.5 m/s is ~0.14 m
+      # (0.06 m braking at 2 m/s^2 + 0.075 m for ~150 ms latency),
+      # so a 0.6 m stop gap leaves ~0.45 m of margin.
+      stop_gap_m: 0.6
+      path_half_width_m: 0.24     # robot half-width with wheels (0.14) + 0.10 margin
+      robot_front_x_m: 0.15       # front edge of the 0.30 m chassis, in base_footprint
+      large_blob_area_ratio: 0.5  # safety net for obstacles whose base is not visible
+      clip_margin_px: 2
+
+    camera:
+      # Height, pitch and x offset are read from TF (the URDF) by default.
+      use_tf: true
+      # Fallback values, used only when use_tf is false:
+      mount_height_m: 0.135
+      pitch_rad: 0.15
+      x_m: 0.14

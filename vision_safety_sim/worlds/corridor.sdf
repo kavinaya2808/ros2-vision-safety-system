@@ -1,0 +1,163 @@
+<?xml version="1.0" ?>
+<!--
+  corridor.sdf: test world for the vision safety system.
+
+  Robot spawns at the origin facing +x down a 2 m wide corridor.
+
+    y=+1  ==================================================  wall
+              . red_patch (small, T4 noise)      [blue_box] (non-red, off path)
+    x=0  >robot           [red_obstacle] (main target, x = 3.0)
+    y=-1  ==================================================  wall
+                                                         end wall at x = 8
+-->
+<sdf version="1.10">
+  <world name="corridor">
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <!-- Core systems -->
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- Needed for the camera sensor to render -->
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <gravity>0 0 -9.81</gravity>
+
+    <scene>
+      <ambient>0.5 0.5 0.5 1</ambient>
+      <background>0.8 0.85 0.9 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.85 0.85 0.85 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.4 0.2 -0.9</direction>
+    </light>
+
+    <!-- ===================== Ground ===================== -->
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2></ode></friction></surface>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>40 40</size></plane></geometry>
+          <material>
+            <ambient>0.55 0.55 0.55 1</ambient>
+            <diffuse>0.6 0.6 0.6 1</diffuse>
+            <specular>0.05 0.05 0.05 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================== Corridor walls ===================== -->
+    <model name="corridor_walls">
+      <static>true</static>
+
+      <link name="left_wall">
+        <pose>3.5 1.05 0.25 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>9.0 0.1 0.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>9.0 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+
+      <link name="right_wall">
+        <pose>3.5 -1.05 0.25 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>9.0 0.1 0.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>9.0 0.1 0.5</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+
+      <link name="end_wall">
+        <pose>8.05 0 0.25 0 0 0</pose>
+        <collision name="collision"><geometry><box><size>0.1 2.2 0.5</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.1 2.2 0.5</size></box></geometry>
+          <material>
+            <ambient>0.85 0.85 0.82 1</ambient>
+            <diffuse>0.85 0.85 0.82 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- ===================== Obstacles ===================== -->
+
+    <!-- Main target: red box in the robot's path (T2) -->
+    <model name="red_obstacle">
+      <static>true</static>
+      <pose>3.0 0 0.15 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.3</size></box></geometry>
+          <material>
+            <ambient>0.8 0.0 0.0 1</ambient>
+            <diffuse>0.9 0.0 0.0 1</diffuse>
+            <specular>0.1 0.1 0.1 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Small red patch on the floor: should be filtered as noise (T4) -->
+    <model name="red_patch">
+      <static>true</static>
+      <pose>1.5 0.45 0.002 0 0 0</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><cylinder><radius>0.03</radius><length>0.004</length></cylinder></geometry>
+          <material>
+            <ambient>0.8 0.0 0.0 1</ambient>
+            <diffuse>0.9 0.0 0.0 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Non-red obstacle off the path: must NOT trigger the red detector -->
+    <model name="blue_box">
+      <static>true</static>
+      <pose>2.0 -0.75 0.15 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><box><size>0.3 0.3 0.3</size></box></geometry></collision>
+        <visual name="visual">
+          <geometry><box><size>0.3 0.3 0.3</size></box></geometry>
+          <material>
+            <ambient>0.0 0.1 0.8 1</ambient>
+            <diffuse>0.0 0.1 0.9 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

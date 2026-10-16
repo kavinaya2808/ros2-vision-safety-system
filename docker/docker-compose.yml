@@ -1,0 +1,37 @@
+# Base service. GPU access is added by an override file, selected in .env:
+#   COMPOSE_FILE=docker-compose.yml:gpu-nvidia.yml   (NVIDIA)
+#   COMPOSE_FILE=docker-compose.yml:gpu-dri.yml      (Intel / AMD)
+# See .env.example.
+
+services:
+  vision_safety:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USERNAME: ${HOST_USER:-dev}
+        USER_UID: ${HOST_UID:-1000}
+        USER_GID: ${HOST_GID:-1000}
+    image: vision_safety_jazzy:latest
+    container_name: vision_safety
+
+    network_mode: host      # simple DDS discovery
+    ipc: host               # DDS shared-memory transport
+    stdin_open: true
+    tty: true
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_X11_NO_MITSHM=1
+      # Keep this project's ROS graph and Gazebo transport separate from
+      # other ROS / Gazebo containers on the same host network.
+      - ROS_DOMAIN_ID=42
+      - GZ_PARTITION=vision_safety
+
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # The colcon workspace root. This file lives in <ws>/src/ros2-vision-safety-system/docker,
+      # so <ws> is three levels up.
+      - ../../..:/home/${HOST_USER:-dev}/ws
+
+    working_dir: /home/${HOST_USER:-dev}/ws

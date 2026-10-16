@@ -1,0 +1,20 @@
+# safety_monitor parameters. All but rate_hz can be changed live:
+#   ros2 param set /safety_monitor clear_hold_time_s 1.0
+
+safety_monitor:
+  ros__parameters:
+    rate_hz: 20.0                 # cmd_vel + safety/status output rate (read-only)
+
+    # Perception older than this (sim time, measured from the IMAGE stamp) -> full stop.
+    # Camera runs at 30 Hz (33 ms/frame) and perception takes ~3 ms, so 0.3 s means
+    # roughly 9 consecutive frames lost before the robot stops.
+    max_detection_age_s: 0.3
+
+    command_timeout_s: 0.5        # no cmd_vel_raw for this long -> zero output
+    clear_hold_time_s: 0.5        # path must stay clear this long before resuming
+    block_forward_only: true      # when blocked: reverse and turning still allowed
+
+    # Output limits (match the DiffDrive limits in the robot URDF)
+    max_linear_speed: 0.5
+    max_reverse_speed: 0.3
+    max_angular_speed: 1.5

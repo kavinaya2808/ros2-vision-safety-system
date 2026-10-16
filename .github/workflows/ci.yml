@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    name: Build + unit & node tests (ROS 2 Jazzy)
+    runs-on: ubuntu-24.04
+    container: ros:jazzy-ros-base
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      # Shared runners have more scheduling jitter than a workstation.
+      VISION_SAFETY_TIMING_SLACK: "0.4"
+
+    steps:
+      - name: Check out into a colcon workspace
+        uses: actions/checkout@v4
+        with:
+          path: src/ros2-vision-safety-system
+
+      # The Gazebo packages (vision_safety_sim, vision_safety_bringup) are not
+      # built here: their scenario tests need a GPU. They run locally, see
+      # docs/test_results.md.
+      - name: Install dependencies
+        run: |
+          apt-get update
+          rosdep update --rosdistro jazzy
+          rosdep install -y --rosdistro jazzy --ignore-src --from-paths \
+            src/ros2-vision-safety-system/vision_safety_interfaces \
+            src/ros2-vision-safety-system/vision_safety_core \
+            src/ros2-vision-safety-system/vision_safety_ros
+
+      - name: Build
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          colcon build --packages-up-to vision_safety_ros \
+            --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            --event-handlers console_cohesion+
+
+      - name: Test
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          source install/setup.bash
+          colcon test --packages-select vision_safety_core vision_safety_ros \
+            --event-handlers console_cohesion+ --return-code-on-test-failure
+          colcon test-result --verbose
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: build/*/test_results/

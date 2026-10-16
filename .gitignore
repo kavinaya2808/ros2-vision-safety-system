@@ -1,0 +1,23 @@
+# colcon (in case the repo is used as the workspace root)
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Local Docker settings (user IDs, GPU choice)
+docker/.env
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Raw screen recordings (commit only the optimised docs/media/demo.gif)
+*.mp4
+*.webm
+*.mkv

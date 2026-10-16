@@ -1,0 +1,7 @@
+# Intel / AMD GPU via Mesa (direct rendering device).
+services:
+  vision_safety:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - video

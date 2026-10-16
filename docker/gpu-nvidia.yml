@@ -1,0 +1,17 @@
+# NVIDIA GPU (requires the NVIDIA Container Toolkit on the host).
+services:
+  vision_safety:
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      # 'all' includes the GRAPHICS capability, which Gazebo's OpenGL rendering
+      # and its camera sensor need. The default (compute,utility) is enough for
+      # nvidia-smi but NOT for rendering.
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - __GLX_VENDOR_LIBRARY_NAME=nvidia
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
